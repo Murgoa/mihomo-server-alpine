@@ -51,7 +51,7 @@ get_valid_port() {
 }
 
 # ==========
-# Mihomo 一键安装脚本（Alpine Linux 专用版，Hysteria2 + AnyTLS + Shadowsocks-2022，支持自定义端口）
+# Mihomo 一键安装脚本（Alpine Linux 专用版，Hysteria2 + AnyTLS + Shadowsocks-2022 + TUIC v5，支持自定义端口）
 # ==========
 
 # 检查并安装依赖
@@ -155,7 +155,7 @@ fi
 # 生成配置与证书
 # ==========
 mkdir -p $HOME/.config/mihomo/
-echo "🔐 生成新的 SSL 证书（供 Hysteria2 和 AnyTLS 使用）..."
+echo "🔐 生成新的 SSL 证书（供 Hysteria2、AnyTLS、TUIC 使用）..."
 openssl req -newkey rsa:2048 -nodes \
   -keyout $HOME/.config/mihomo/server.key \
   -x509 -days 365 \
@@ -164,23 +164,20 @@ openssl req -newkey rsa:2048 -nodes \
 
 HY2_PASSWORD=$(uuidgen)
 ANYTLS_PASSWORD=$(uuidgen)
-
-# 生成 Shadowsocks-2022 server key（24 字节 base64）
 SS2022_SERVER_KEY=$(openssl rand -base64 24)
+TUIC_UUID=$(uuidgen)
+TUIC_PASSWORD=$(uuidgen)
 
 echo ""
-echo "🌟 请为三个协议设置监听端口（建议使用 NAT 提供商放行的端口）"
+echo "🌟 请为四个协议设置监听端口（建议使用 NAT 提供商放行的端口，如 443）"
 
-# 先设置 HY2 端口
+# 依次设置端口
 HY2_PORT=$(get_valid_port "请输入 Hysteria2 端口" "")
-
-# 再设置 AnyTLS 端口
 ANYTLS_PORT=$(get_valid_port "请输入 AnyTLS 端口" "$HY2_PORT")
-
-# 最后设置 SS2022 端口
 SS2022_PORT=$(get_valid_port "请输入 Shadowsocks-2022 端口" "$HY2_PORT $ANYTLS_PORT")
+TUIC_PORT=$(get_valid_port "请输入 TUIC v5 端口" "$HY2_PORT $ANYTLS_PORT $SS2022_PORT")
 
-echo "✅ 已设置端口：Hysteria2 $HY2_PORT，AnyTLS $ANYTLS_PORT，Shadowsocks-2022 $SS2022_PORT"
+echo "✅ 已设置端口：Hysteria2 $HY2_PORT，AnyTLS $ANYTLS_PORT，Shadowsocks-2022 $SS2022_PORT，TUIC $TUIC_PORT"
 
 cat > $HOME/.config/mihomo/config.yaml <<EOF
 listeners:
@@ -207,6 +204,18 @@ listeners:
   cipher: 2022-blake3-aes-256-gcm
   password: $SS2022_SERVER_KEY
   udp: true
+- name: tuic
+  type: tuic
+  port: $TUIC_PORT
+  listen: 0.0.0.0
+  certificate: ./server.crt
+  private-key: ./server.key
+  users:
+    "$TUIC_UUID": "$TUIC_PASSWORD"
+  congestion-controller: bbr
+  udp: true
+  alpn:
+    - h3
 EOF
 
 # ==========
@@ -273,6 +282,20 @@ echo "  port: $SS2022_PORT"
 echo "  cipher: 2022-blake3-aes-256-gcm"
 echo "  password: $SS2022_SERVER_KEY"
 echo "  udp: true"
+
+echo -e "\n4. TUIC v5 客户端配置:"
+echo -e "\n- name: $PUBLIC_IP｜Direct｜tuic"
+echo "  type: tuic"
+echo "  server: $PUBLIC_IP"
+echo "  port: $TUIC_PORT"
+echo "  uuid: $TUIC_UUID"
+echo "  password: $TUIC_PASSWORD"
+echo "  sni: www.usavps.com"   # 可自定义伪装域名
+echo "  alpn: [h3]"
+echo "  udp: true"
+echo "  skip-cert-verify: true"
+echo "  congestion-controller: bbr"
+echo "  reduce-rtt: true"
 echo "=============================================="
 
 echo -e "\nCompact 格式配置（可直接粘贴到 Mihomo proxies 列表中）:"
@@ -280,11 +303,13 @@ echo "----------------------------------------------"
 echo "- {name: \"$PUBLIC_IP｜Direct｜anytls\", type: anytls, server: $PUBLIC_IP, port: $ANYTLS_PORT, password: \"$ANYTLS_PASSWORD\", skip-cert-verify: true, sni: www.usavps.com, udp: true, tfo: true, tls: true, client-fingerprint: chrome}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜hy2\", type: hysteria2, server: $PUBLIC_IP, port: $HY2_PORT, password: \"$HY2_PASSWORD\", udp: true, sni: bing.com, skip-cert-verify: true}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜ss2022\", type: ss, server: $PUBLIC_IP, port: $SS2022_PORT, cipher: 2022-blake3-aes-256-gcm, password: \"$SS2022_SERVER_KEY\", udp: true}"
+echo "- {name: \"$PUBLIC_IP｜Direct｜tuic\", type: tuic, server: $PUBLIC_IP, port: $TUIC_PORT, uuid: \"$TUIC_UUID\", password: \"$TUIC_PASSWORD\", sni: www.usavps.com, alpn: [\"h3\"], udp: true, skip-cert-verify: true, congestion-controller: bbr, reduce-rtt: true}"
 echo "----------------------------------------------"
 
 echo "hysteria2://$HY2_PASSWORD@$PUBLIC_IP:$HY2_PORT?peer=bing.com&insecure=1#$PUBLIC_IP｜Direct｜hy2"
 echo "anytls://$ANYTLS_PASSWORD@$PUBLIC_IP:$ANYTLS_PORT?peer=www.usavps.com&insecure=1&fastopen=1&udp=1#$PUBLIC_IP｜Direct｜anytls"
 echo "ss://$(echo -n "2022-blake3-aes-256-gcm:$SS2022_SERVER_KEY" | base64 -w 0)@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
+echo "tuic://$TUIC_UUID:$TUIC_PASSWORD@$PUBLIC_IP:$TUIC_PORT?alpn=h3&sni=www.usavps.com&congestion_control=bbr&udp_relay_mode=native&allow_udp=true#$PUBLIC_IP｜Direct｜tuic"
 
 rc-service mihomo restart
 
