@@ -1,35 +1,67 @@
 #!/usr/bin/env bash
+set -e
 
-# 停止并禁用服务
-echo "停止并禁用mihomo服务..."
-systemctl stop mihomo.service 2>/dev/null
-systemctl disable mihomo.service 2>/dev/null
+echo "🚀 开始卸载 Mihomo（Hysteria2 + AnyTLS + Shadowsocks-2022）"
 
-# 删除服务文件
-echo "删除systemd服务文件..."
-rm -f /etc/systemd/system/mihomo.service
-systemctl daemon-reload
-
-# 删除二进制文件
-echo "删除mihomo二进制文件..."
-rm -f /usr/local/bin/mihomo
-
-# 删除配置文件和证书
-echo "删除配置目录..."
-rm -rf $HOME/.config/mihomo
-
-# 检查是否完全卸载
-echo -e "\n卸载完成，检查残留文件："
-if [[ -f /usr/local/bin/mihomo || -d $HOME/.config/mihomo ]]; then
-    echo "警告：以下文件未被删除："
-    [[ -f /usr/local/bin/mihomo ]] && echo "  /usr/local/bin/mihomo"
-    [[ -d /root/.config/mihomo ]] && echo "  /root/.config/mihomo/"
+# 停止服务
+if rc-service mihomo status &>/dev/null; then
+    echo "⏹️  停止 mihomo 服务..."
+    rc-service mihomo stop
 else
-    echo "所有相关文件已成功移除"
+    echo "ℹ️  mihomo 服务未在运行，跳过停止步骤"
 fi
 
-# 提示用户手动操作
-echo -e "\n可能需要手动执行以下操作："
-echo "1. 如果修改过防火墙规则，请手动清理相关规则"
-echo "2. 如果创建过专用用户，请手动删除用户"
-echo "3. 运行 'systemctl reset-failed' 清理失败的服务记录"
+# 删除开机自启
+if rc-update show default | grep -q mihomo; then
+    echo "🔕 移除开机自启..."
+    rc-update del mihomo default
+else
+    echo "ℹ️  开机自启已不存在，跳过"
+fi
+
+# 删除服务脚本
+if [ -f /etc/init.d/mihomo ]; then
+    echo "🗑️  删除服务脚本 /etc/init.d/mihomo"
+    rm -f /etc/init.d/mihomo
+else
+    echo "ℹ️  服务脚本已不存在，跳过"
+fi
+
+# 删除 Mihomo 二进制
+if command -v mihomo &>/dev/null || [ -f /usr/local/bin/mihomo ]; then
+    echo "🗑️  删除 mihomo 二进制 /usr/local/bin/mihomo"
+    rm -f /usr/local/bin/mihomo
+else
+    echo "ℹ️  mihomo 二进制已不存在，跳过"
+fi
+
+# 删除配置文件目录（谨慎操作，确认用户意图）
+echo ""
+echo "⚠️  即将删除用户配置文件目录：$HOME/.config/mihomo/"
+echo "    该目录包含 config.yaml、证书（server.crt/server.key）等文件"
+read -p "是否确认删除？（输入 y 或 Y 确认，其余取消）: " confirm
+
+if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+    if [ -d "$HOME/.config/mihomo" ]; then
+        echo "🗑️  删除配置文件目录 $HOME/.config/mihomo"
+        rm -rf "$HOME/.config/mihomo"
+    else
+        echo "ℹ️  配置文件目录已不存在，跳过"
+    fi
+else
+    echo "ℹ️  用户取消，保留配置文件目录（可手动删除）"
+fi
+
+# 清理可能的 pid 文件
+if [ -f /run/mihomo.pid ]; then
+    echo "🗑️  删除残留 pid 文件"
+    rm -f /run/mihomo.pid
+fi
+
+echo ""
+echo "✅ Mihomo 卸载完成！"
+echo "    如需彻底清理，可手动检查以下路径："
+echo "    - /usr/local/bin/mihomo"
+echo "    - /etc/init.d/mihomo"
+echo "    - $HOME/.config/mihomo"
+echo "    - /run/mihomo.pid"
