@@ -19,5 +19,5 @@ bash <(curl -fsSL https://github.com/Murgoa/mihomo-server-alpine/raw/refs/heads/
 📌 **一键卸载命令** (复制以下命令使用`root`直接运行):
 
 ```bash
-bash <(curl -fsSL https://github.com/iahfdoa/mihomo-server-alpine/releases/latest/download/uninstall.sh)
+bash <(curl -fsSL https://github.com/Murgoa/mihomo-server-alpine/raw/refs/heads/main/uninstall.sh)
 ```
