@@ -14,7 +14,7 @@
 
 📌 **一键安装命令** (复制以下命令使用`root`直接运行):
 ```bash
-bash <(curl -fsSL https://github.com/iahfdoa/mihomo-scripts/releases/latest/download/install-all.sh)
+bash <(curl -fsSL https://github.com/Murgoa/mihomo-server-alpine/raw/refs/heads/main/install.sh)
 ```
 📌 **一键卸载命令** (复制以下命令使用`root`直接运行):
 
