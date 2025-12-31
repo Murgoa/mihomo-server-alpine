@@ -7,10 +7,10 @@ is_port_used() {
     grep -q ":$(printf '%04X' $port)" /proc/net/tcp /proc/net/udp 2>/dev/null
 }
 
-# 获取有效端口（检查占用 + 与其他端口不冲突）
+# 获取有效端口
 get_valid_port() {
     local prompt=$1
-    local forbidden_ports=($2)  # 数组传入已占用端口
+    local forbidden_ports=($2)
     local port
 
     while true; do
@@ -51,15 +51,36 @@ get_valid_port() {
 }
 
 # ==========
-# Mihomo 一键安装脚本（Alpine Linux 专用版，Hysteria2 + AnyTLS + Shadowsocks-2022 + TUIC v5，支持自定义端口）
+# 通用一键安装脚本（兼容 Alpine、Debian、Ubuntu）
+# 支持 Hysteria2 + AnyTLS + Shadowsocks-2022 + TUIC v5
 # ==========
 
-# 检查并安装依赖
+# 检测系统类型
+if command -v apk &>/dev/null; then
+    OS="alpine"
+    PKG_MANAGER="apk"
+    INIT_SYSTEM="openrc"
+elif command -v apt &>/dev/null; then
+    OS="debian"
+    PKG_MANAGER="apt"
+    INIT_SYSTEM="systemd"
+else
+    echo "❌ 不支持的系统，仅支持 Alpine、Debian、Ubuntu"
+    exit 1
+fi
+
+echo "🖥️  检测到系统: $OS ($INIT_SYSTEM)"
+
+# 安装依赖
 install_dependencies() {
-    echo "🔧 检查并安装依赖..."
-    apk update
-    apk add --no-cache curl openssl wget gzip util-linux  # util-linux 提供 uuidgen
-    echo "✅ 依赖安装完成"
+    echo "🔧 安装必要依赖..."
+    if [ "$PKG_MANAGER" = "apk" ]; then
+        apk update
+        apk add --no-cache curl openssl wget gzip util-linux
+    elif [ "$PKG_MANAGER" = "apt" ]; then
+        apt update -y
+        apt install -y curl openssl wget gzip uuid-runtime ca-certificates
+    fi
 }
 
 for cmd in curl wget gzip openssl uuidgen; do
@@ -69,32 +90,17 @@ for cmd in curl wget gzip openssl uuidgen; do
     fi
 done
 
-# ==========
-# 检测系统架构
-# ==========
+# 检测架构
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)
-        BIN_ARCH="amd64"
-        ;;
-    aarch64)
-        BIN_ARCH="arm64"
-        ;;
-    armv7l)
-        BIN_ARCH="armv7"
-        ;;
-    armv6l)
-        BIN_ARCH="armv6"
-        ;;
-    *)
-        echo "❌ 不支持的架构: $ARCH"
-        exit 1
-        ;;
+    x86_64)  BIN_ARCH="amd64" ;;
+    aarch64) BIN_ARCH="arm64" ;;
+    armv7l)  BIN_ARCH="armv7" ;;
+    armv6l)  BIN_ARCH="armv6" ;;
+    *)       echo "❌ 不支持的架构: $ARCH" && exit 1 ;;
 esac
 
-# ==========
-# 检测 CPU 指令集 (仅 amd64 使用 v1/v2/v3)
-# ==========
+# CPU 指令集（仅 amd64）
 CPU_FLAGS=$(grep flags /proc/cpuinfo | head -n1 || echo "")
 if [[ $BIN_ARCH == "amd64" && $CPU_FLAGS =~ avx2 ]]; then
     LEVEL="v3"
@@ -103,64 +109,46 @@ elif [[ $BIN_ARCH == "amd64" && $CPU_FLAGS =~ avx ]]; then
 else
     LEVEL="v1"
 fi
-echo "🧠 检测到 CPU 架构: $ARCH, 指令集等级: $LEVEL"
+echo "🧠 CPU 架构: $ARCH, 指令集等级: $LEVEL"
 
-# ==========
 # 下载并安装 Mihomo
-# ==========
 if ! command -v mihomo &>/dev/null; then
     echo "⬇️  正在安装 mihomo ..."
-
     LATEST_VERSION=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    if [ -z "$LATEST_VERSION" ]; then
-        echo "❌ 获取版本号失败"
-        exit 1
-    fi
+    [ -z "$LATEST_VERSION" ] && echo "❌ 获取版本失败" && exit 1
 
-    # 优先使用 compatible 版本（更适合 Alpine 的 musl）
-    if [ "$BIN_ARCH" = "amd64" ]; then
-        FILE_NAME="mihomo-linux-${BIN_ARCH}-compatible-${LATEST_VERSION}.gz"
+    # Alpine 优先 compatible，其余优先高性能版
+    if [ "$OS" = "alpine" ]; then
+        PRI_FILE="mihomo-linux-${BIN_ARCH}-compatible-${LATEST_VERSION}.gz"
+        FALLBACK_FILE="mihomo-linux-${BIN_ARCH}-${LATEST_VERSION}.gz"
     else
-        FILE_NAME="mihomo-linux-${BIN_ARCH}-compatible-${LATEST_VERSION}.gz"
-        if ! curl -sLI "https://github.com/MetaCubeX/mihomo/releases/download/${LATEST_VERSION}/${FILE_NAME}" | grep -q "200 OK"; then
-            FILE_NAME="mihomo-linux-${BIN_ARCH}-${LATEST_VERSION}.gz"
-        fi
-    fi
-
-    DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${LATEST_VERSION}/${FILE_NAME}"
-    if ! wget -O /tmp/mihomo.gz "$DOWNLOAD_URL" 2>/dev/null; then
-        echo "⚠️ compatible 版本下载失败，尝试其他版本..."
         if [ "$BIN_ARCH" = "amd64" ]; then
-            FILE_NAME="mihomo-linux-${BIN_ARCH}-${LEVEL}-${LATEST_VERSION}.gz"
+            PRI_FILE="mihomo-linux-${BIN_ARCH}-${LEVEL}-${LATEST_VERSION}.gz"
         else
-            FILE_NAME="mihomo-linux-${BIN_ARCH}-${LATEST_VERSION}.gz"
+            PRI_FILE="mihomo-linux-${BIN_ARCH}-${LATEST_VERSION}.gz"
         fi
-        DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${LATEST_VERSION}/${FILE_NAME}"
-        wget -O /tmp/mihomo.gz "$DOWNLOAD_URL" || {
-            echo "❌ 所有下载方式失败，请检查网络或 GitHub 访问。"
-            exit 1
-        }
+        FALLBACK_FILE="mihomo-linux-${BIN_ARCH}-compatible-${LATEST_VERSION}.gz"
     fi
 
-    echo "📦 下载 ${FILE_NAME} ..."
+    DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${LATEST_VERSION}/${PRI_FILE}"
+    if ! wget -O /tmp/mihomo.gz "$DOWNLOAD_URL" 2>/dev/null; then
+        echo "⚠️ 主版本下载失败，尝试备用版本..."
+        DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${LATEST_VERSION}/${FALLBACK_FILE}"
+        wget -O /tmp/mihomo.gz "$DOWNLOAD_URL" || { echo "❌ 下载失败" && exit 1; }
+    fi
+
     gzip -d /tmp/mihomo.gz
     chmod +x /tmp/mihomo
     mv /tmp/mihomo /usr/local/bin/mihomo
     echo "✅ mihomo 安装完成"
 else
-    echo "✅ 已检测到 mihomo，跳过安装步骤"
+    echo "✅ 已检测到 mihomo，跳过安装"
 fi
 
-# ==========
-# 生成配置与证书
-# ==========
+# 生成证书与密码
 mkdir -p $HOME/.config/mihomo/
-echo "🔐 生成新的 SSL 证书（供 Hysteria2、AnyTLS、TUIC 使用）..."
-openssl req -newkey rsa:2048 -nodes \
-  -keyout $HOME/.config/mihomo/server.key \
-  -x509 -days 365 \
-  -out $HOME/.config/mihomo/server.crt \
-  -subj "/C=US/ST=CA/L=SF/O=$(openssl rand -hex 8)/CN=$(openssl rand -hex 12)"
+echo "🔐 生成自签名证书..."
+openssl req -newkey rsa:2048 -nodes -keyout $HOME/.config/mihomo/server.key -x509 -days 365 -out $HOME/.config/mihomo/server.crt -subj "/C=US/ST=CA/L=SF/O=$(openssl rand -hex 8)/CN=$(openssl rand -hex 12)"
 
 HY2_PASSWORD=$(uuidgen)
 ANYTLS_PASSWORD=$(uuidgen)
@@ -169,16 +157,15 @@ TUIC_UUID=$(uuidgen)
 TUIC_PASSWORD=$(uuidgen)
 
 echo ""
-echo "🌟 请为四个协议设置监听端口（建议使用 NAT 提供商放行的端口，如 443）"
-
-# 依次设置端口
+echo "🌟 请为四个协议设置监听端口（NAT VPS 请使用放行端口，如 443）"
 HY2_PORT=$(get_valid_port "请输入 Hysteria2 端口" "")
 ANYTLS_PORT=$(get_valid_port "请输入 AnyTLS 端口" "$HY2_PORT")
 SS2022_PORT=$(get_valid_port "请输入 Shadowsocks-2022 端口" "$HY2_PORT $ANYTLS_PORT")
 TUIC_PORT=$(get_valid_port "请输入 TUIC v5 端口" "$HY2_PORT $ANYTLS_PORT $SS2022_PORT")
 
-echo "✅ 已设置端口：Hysteria2 $HY2_PORT，AnyTLS $ANYTLS_PORT，Shadowsocks-2022 $SS2022_PORT，TUIC $TUIC_PORT"
+echo "✅ 端口设置完成：Hy2 $HY2_PORT | AnyTLS $ANYTLS_PORT | SS2022 $SS2022_PORT | TUIC $TUIC_PORT"
 
+# 生成 config.yaml
 cat > $HOME/.config/mihomo/config.yaml <<EOF
 listeners:
 - name: anytls-in-1
@@ -218,87 +205,74 @@ listeners:
     - h3
 EOF
 
-# ==========
-# 创建 OpenRC 服务
-# ==========
-cat > /etc/init.d/mihomo <<'EOF'
-#!/sbin/openrc-run
+# 创建服务
+if [ "$INIT_SYSTEM" = "systemd" ]; then
+    cat > /etc/systemd/system/mihomo.service <<EOF
+[Unit]
+Description=Mihomo Service
+After=network.target
 
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mihomo -d $HOME/.config/mihomo
+Restart=on-failure
+RestartSec=3
+User=root
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now mihomo.service || echo "⚠️ systemd 服务启动失败"
+else  # openrc
+    cat > /etc/init.d/mihomo <<'EOF'
+#!/sbin/openrc-run
 description="Mihomo Service"
 command="/usr/local/bin/mihomo"
 command_args="-d $HOME/.config/mihomo"
 pidfile="/run/mihomo.pid"
 command_background="yes"
-
-depend() {
-    need net
-    after firewall
-}
-
-start_pre() {
-    mkdir -p $(dirname $pidfile)
-}
+depend() { need net; after firewall; }
+start_pre() { mkdir -p $(dirname $pidfile); }
 EOF
-
-chmod +x /etc/init.d/mihomo
-rc-update add mihomo default
-rc-service mihomo start || {
-    echo "⚠️ 服务启动失败，请查看日志: rc-service mihomo status"
-}
+    chmod +x /etc/init.d/mihomo
+    rc-update add mihomo default
+    rc-service mihomo start || echo "⚠️ openrc 服务启动失败"
+fi
 
 PUBLIC_IP=$(curl -4 -s ifconfig.me || echo "你的公网IP")
 
-# 输出客户端配置
 echo -e "\n\n新的客户端配置信息："
 echo "=============================================="
-echo "1. Hysteria2 客户端配置:"
-echo -e "\n- name: $PUBLIC_IP｜Direct｜hy2"
-echo "  type: hysteria2"
-echo "  server: $PUBLIC_IP"
-echo "  port: $HY2_PORT"
-echo "  password: '$HY2_PASSWORD'"
-echo "  udp: true"
-echo "  sni: bing.com"
-echo "  skip-cert-verify: true"
+echo "1. Hysteria2"
+echo "   name: $PUBLIC_IP｜Direct｜hy2"
+echo "   type: hysteria2"
+echo "   server: $PUBLIC_IP  port: $HY2_PORT  password: $HY2_PASSWORD"
+echo "   sni: bing.com  skip-cert-verify: true  udp: true"
 
-echo -e "\n2. AnyTLS 客户端配置:"
-echo -e "\n- name: $PUBLIC_IP｜Direct｜anytls"
-echo "  server: $PUBLIC_IP"
-echo "  type: anytls"
-echo "  port: $ANYTLS_PORT"
-echo "  password: $ANYTLS_PASSWORD"
-echo "  skip-cert-verify: true"
-echo "  sni: www.usavps.com"
-echo "  udp: true"
-echo "  tfo: true"
-echo "  tls: true"
-echo "  client-fingerprint: chrome"
+echo -e "\n2. AnyTLS"
+echo "   name: $PUBLIC_IP｜Direct｜anytls"
+echo "   type: anytls"
+echo "   server: $PUBLIC_IP  port: $ANYTLS_PORT  password: $ANYTLS_PASSWORD"
+echo "   sni: www.usavps.com  skip-cert-verify: true  udp: true  tfo: true  client-fingerprint: chrome"
 
-echo -e "\n3. Shadowsocks-2022 客户端配置:"
-echo -e "\n- name: $PUBLIC_IP｜Direct｜ss2022"
-echo "  type: ss"
-echo "  server: $PUBLIC_IP"
-echo "  port: $SS2022_PORT"
-echo "  cipher: 2022-blake3-aes-256-gcm"
-echo "  password: $SS2022_SERVER_KEY"
-echo "  udp: true"
+echo -e "\n3. Shadowsocks-2022"
+echo "   name: $PUBLIC_IP｜Direct｜ss2022"
+echo "   type: ss"
+echo "   server: $PUBLIC_IP  port: $SS2022_PORT"
+echo "   cipher: 2022-blake3-aes-256-gcm  password: $SS2022_SERVER_KEY  udp: true"
 
-echo -e "\n4. TUIC v5 客户端配置:"
-echo -e "\n- name: $PUBLIC_IP｜Direct｜tuic"
-echo "  type: tuic"
-echo "  server: $PUBLIC_IP"
-echo "  port: $TUIC_PORT"
-echo "  uuid: $TUIC_UUID"
-echo "  password: $TUIC_PASSWORD"
-echo "  sni: www.usavps.com"   # 可自定义伪装域名
-echo "  alpn: [h3]"
-echo "  udp: true"
-echo "  skip-cert-verify: true"
-echo "  congestion-controller: bbr"
-echo "  reduce-rtt: true"
+echo -e "\n4. TUIC v5"
+echo "   name: $PUBLIC_IP｜Direct｜tuic"
+echo "   type: tuic"
+echo "   server: $PUBLIC_IP  port: $TUIC_PORT"
+echo "   uuid: $TUIC_UUID  password: $TUIC_PASSWORD"
+echo "   sni: www.usavps.com  alpn: [h3]  skip-cert-verify: true  congestion-controller: bbr  reduce-rtt: true"
 echo "=============================================="
 
-echo -e "\nCompact 格式配置（可直接粘贴到 Mihomo proxies 列表中）:"
+echo -e "\nCompact 配置（直接粘贴到 proxies）:"
 echo "----------------------------------------------"
 echo "- {name: \"$PUBLIC_IP｜Direct｜anytls\", type: anytls, server: $PUBLIC_IP, port: $ANYTLS_PORT, password: \"$ANYTLS_PASSWORD\", skip-cert-verify: true, sni: www.usavps.com, udp: true, tfo: true, tls: true, client-fingerprint: chrome}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜hy2\", type: hysteria2, server: $PUBLIC_IP, port: $HY2_PORT, password: \"$HY2_PASSWORD\", udp: true, sni: bing.com, skip-cert-verify: true}"
@@ -309,9 +283,15 @@ echo "----------------------------------------------"
 echo "hysteria2://$HY2_PASSWORD@$PUBLIC_IP:$HY2_PORT?peer=bing.com&insecure=1#$PUBLIC_IP｜Direct｜hy2"
 echo "anytls://$ANYTLS_PASSWORD@$PUBLIC_IP:$ANYTLS_PORT?peer=www.usavps.com&insecure=1&fastopen=1&udp=1#$PUBLIC_IP｜Direct｜anytls"
 echo "ss://$(echo -n "2022-blake3-aes-256-gcm:$SS2022_SERVER_KEY" | base64 -w 0)@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
-echo "tuic://$TUIC_UUID:$TUIC_PASSWORD@$PUBLIC_IP:$TUIC_PORT?alpn=h3&sni=www.usavps.com&congestion_control=bbr&udp_relay_mode=native&allow_udp=true#$PUBLIC_IP｜Direct｜tuic"
+echo "tuic://$TUIC_UUID:$TUIC_PASSWORD@$PUBLIC_IP:$TUIC_PORT?alpn=h3&sni=www.usavps.com&congestion_control=bbr&udp_relay_mode=native#$PUBLIC_IP｜Direct｜tuic"
 
-rc-service mihomo restart
-
-echo -e "\n服务状态:"
-rc-service mihomo status
+# 重启服务
+if [ "$INIT_SYSTEM" = "systemd" ]; then
+    systemctl restart mihomo.service
+    echo -e "\n服务状态:"
+    systemctl status mihomo --no-pager -l
+else
+    rc-service mihomo restart
+    echo -e "\n服务状态:"
+    rc-service mihomo status
+fi
