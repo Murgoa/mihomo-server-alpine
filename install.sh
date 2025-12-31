@@ -52,8 +52,7 @@ get_valid_port() {
 
 # ==========
 # 通用一键安装脚本（兼容 Alpine、Debian、Ubuntu）
-# 支持 Hysteria2 + AnyTLS + Shadowsocks-2022 + TUIC v5
-# 配置文件统一放在 /etc/mihomo/
+# 支持 Hysteria2 + AnyTLS + Shadowsocks-2022 (128) + TUIC v5
 # ==========
 
 # 检测系统类型
@@ -145,7 +144,7 @@ else
     echo "✅ 已检测到 mihomo，跳过安装"
 fi
 
-# 统一使用 /etc/mihomo 作为配置目录
+# 统一配置目录
 CONFIG_DIR="/etc/mihomo"
 mkdir -p "$CONFIG_DIR"
 echo "🔐 生成自签名证书到 $CONFIG_DIR ..."
@@ -153,7 +152,8 @@ openssl req -newkey rsa:2048 -nodes -keyout "$CONFIG_DIR/server.key" -x509 -days
 
 HY2_PASSWORD=$(uuidgen)
 ANYTLS_PASSWORD=$(uuidgen)
-SS2022_SERVER_KEY=$(openssl rand -base64 24)
+# SS2022 使用 AES-128，密钥长度 16 字节
+SS2022_SERVER_KEY=$(openssl rand -base64 16)
 TUIC_UUID=$(uuidgen)
 TUIC_PASSWORD=$(uuidgen)
 
@@ -189,7 +189,7 @@ listeners:
   type: shadowsocks
   port: $SS2022_PORT
   listen: 0.0.0.0
-  cipher: 2022-blake3-aes-256-gcm
+  cipher: 2022-blake3-aes-128-gcm
   password: $SS2022_SERVER_KEY
   udp: true
 - name: tuic
@@ -206,7 +206,7 @@ listeners:
     - h3
 EOF
 
-# 创建服务（统一使用 /etc/mihomo）
+# 创建服务
 if [ "$INIT_SYSTEM" = "systemd" ]; then
     cat > /etc/systemd/system/mihomo.service <<EOF
 [Unit]
@@ -227,7 +227,7 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable --now mihomo.service
-else  # openrc
+else
     cat > /etc/init.d/mihomo <<'EOF'
 #!/sbin/openrc-run
 description="Mihomo Service"
@@ -245,26 +245,25 @@ fi
 
 PUBLIC_IP=$(curl -4 -s ifconfig.me || echo "你的公网IP")
 
-# 输出客户端配置（保持不变）
 echo -e "\n\n新的客户端配置信息："
 echo "=============================================="
-echo "1. Hysteria2: server $PUBLIC_IP:$HY2_PORT  password: $HY2_PASSWORD  sni: bing.com"
-echo "2. AnyTLS:    server $PUBLIC_IP:$ANYTLS_PORT  password: $ANYTLS_PASSWORD  sni: www.usavps.com"
-echo "3. SS2022:    server $PUBLIC_IP:$SS2022_PORT  cipher: 2022-blake3-aes-256-gcm  password: $SS2022_SERVER_KEY"
-echo "4. TUIC v5:   server $PUBLIC_IP:$TUIC_PORT  uuid: $TUIC_UUID  password: $TUIC_PASSWORD  sni: www.usavps.com"
+echo "1. Hysteria2: server $PUBLIC_IP:$HY2_PORT  password: $HY2_PASSWORD"
+echo "2. AnyTLS:    server $PUBLIC_IP:$ANYTLS_PORT  password: $ANYTLS_PASSWORD"
+echo "3. Shadowsocks-2022 (128): server $PUBLIC_IP:$SS2022_PORT  cipher: 2022-blake3-aes-128-gcm  password: $SS2022_SERVER_KEY"
+echo "4. TUIC v5:   server $PUBLIC_IP:$TUIC_PORT  uuid: $TUIC_UUID  password: $TUIC_PASSWORD"
 echo "=============================================="
 
 echo -e "\nCompact 配置（直接粘贴到 proxies）:"
 echo "----------------------------------------------"
 echo "- {name: \"$PUBLIC_IP｜Direct｜anytls\", type: anytls, server: $PUBLIC_IP, port: $ANYTLS_PORT, password: \"$ANYTLS_PASSWORD\", skip-cert-verify: true, sni: www.usavps.com, udp: true, tfo: true, tls: true, client-fingerprint: chrome}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜hy2\", type: hysteria2, server: $PUBLIC_IP, port: $HY2_PORT, password: \"$HY2_PASSWORD\", udp: true, sni: bing.com, skip-cert-verify: true}"
-echo "- {name: \"$PUBLIC_IP｜Direct｜ss2022\", type: ss, server: $PUBLIC_IP, port: $SS2022_PORT, cipher: 2022-blake3-aes-256-gcm, password: \"$SS2022_SERVER_KEY\", udp: true}"
+echo "- {name: \"$PUBLIC_IP｜Direct｜ss2022\", type: ss, server: $PUBLIC_IP, port: $SS2022_PORT, cipher: 2022-blake3-aes-128-gcm, password: \"$SS2022_SERVER_KEY\", udp: true}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜tuic\", type: tuic, server: $PUBLIC_IP, port: $TUIC_PORT, uuid: \"$TUIC_UUID\", password: \"$TUIC_PASSWORD\", sni: www.usavps.com, alpn: [\"h3\"], udp: true, skip-cert-verify: true, congestion-controller: bbr, reduce-rtt: true}"
 echo "----------------------------------------------"
 
 echo "hysteria2://$HY2_PASSWORD@$PUBLIC_IP:$HY2_PORT?peer=bing.com&insecure=1#$PUBLIC_IP｜Direct｜hy2"
 echo "anytls://$ANYTLS_PASSWORD@$PUBLIC_IP:$ANYTLS_PORT?peer=www.usavps.com&insecure=1&fastopen=1&udp=1#$PUBLIC_IP｜Direct｜anytls"
-echo "ss://$(echo -n "2022-blake3-aes-256-gcm:$SS2022_SERVER_KEY" | base64 -w 0)@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
+echo "ss://$(echo -n "2022-blake3-aes-128-gcm:$SS2022_SERVER_KEY" | base64 -w 0)@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
 echo "tuic://$TUIC_UUID:$TUIC_PASSWORD@$PUBLIC_IP:$TUIC_PORT?alpn=h3&sni=www.usavps.com&congestion_control=bbr#$PUBLIC_IP｜Direct｜tuic"
 
 # 重启并显示状态
