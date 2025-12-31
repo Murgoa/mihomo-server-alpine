@@ -53,6 +53,7 @@ get_valid_port() {
 # ==========
 # 通用一键安装脚本（兼容 Alpine、Debian、Ubuntu）
 # 支持 Hysteria2 + AnyTLS + Shadowsocks-2022 (128) + TUIC v5
+# 配置目录统一为 ~/.config/mihomo/
 # ==========
 
 # 检测系统类型
@@ -144,16 +145,15 @@ else
     echo "✅ 已检测到 mihomo，跳过安装"
 fi
 
-# 统一配置目录
-CONFIG_DIR="/etc/mihomo"
+# 配置目录统一为 ~/.config/mihomo/
+CONFIG_DIR="$HOME/.config/mihomo"
 mkdir -p "$CONFIG_DIR"
 echo "🔐 生成自签名证书到 $CONFIG_DIR ..."
 openssl req -newkey rsa:2048 -nodes -keyout "$CONFIG_DIR/server.key" -x509 -days 365 -out "$CONFIG_DIR/server.crt" -subj "/C=US/ST=CA/L=SF/O=$(openssl rand -hex 8)/CN=$(openssl rand -hex 12)"
 
 HY2_PASSWORD=$(uuidgen)
 ANYTLS_PASSWORD=$(uuidgen)
-# SS2022 使用 AES-128，密钥长度 16 字节
-SS2022_SERVER_KEY=$(openssl rand -base64 16)
+SS2022_SERVER_KEY=$(openssl rand -base64 16)  # AES-128
 TUIC_UUID=$(uuidgen)
 TUIC_PASSWORD=$(uuidgen)
 
@@ -206,7 +206,7 @@ listeners:
     - h3
 EOF
 
-# 创建服务
+# 创建服务（使用 $HOME 路径）
 if [ "$INIT_SYSTEM" = "systemd" ]; then
     cat > /etc/systemd/system/mihomo.service <<EOF
 [Unit]
@@ -215,7 +215,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/mihomo -d /etc/mihomo
+ExecStart=/usr/local/bin/mihomo -d $HOME/.config/mihomo
 Restart=on-failure
 RestartSec=3
 User=root
@@ -228,15 +228,15 @@ EOF
     systemctl daemon-reload
     systemctl enable --now mihomo.service
 else
-    cat > /etc/init.d/mihomo <<'EOF'
+    cat > /etc/init.d/mihomo <<EOF
 #!/sbin/openrc-run
 description="Mihomo Service"
 command="/usr/local/bin/mihomo"
-command_args="-d /etc/mihomo"
+command_args="-d $HOME/.config/mihomo"
 pidfile="/run/mihomo.pid"
 command_background="yes"
 depend() { need net; after firewall; }
-start_pre() { mkdir -p $(dirname $pidfile); }
+start_pre() { mkdir -p \$(dirname \$pidfile); }
 EOF
     chmod +x /etc/init.d/mihomo
     rc-update add mihomo default
@@ -247,13 +247,13 @@ PUBLIC_IP=$(curl -4 -s ifconfig.me || echo "你的公网IP")
 
 echo -e "\n\n新的客户端配置信息："
 echo "=============================================="
-echo "1. Hysteria2: server $PUBLIC_IP:$HY2_PORT  password: $HY2_PASSWORD"
-echo "2. AnyTLS:    server $PUBLIC_IP:$ANYTLS_PORT  password: $ANYTLS_PASSWORD"
-echo "3. Shadowsocks-2022 (128): server $PUBLIC_IP:$SS2022_PORT  cipher: 2022-blake3-aes-128-gcm  password: $SS2022_SERVER_KEY"
-echo "4. TUIC v5:   server $PUBLIC_IP:$TUIC_PORT  uuid: $TUIC_UUID  password: $TUIC_PASSWORD"
+echo "1. Hysteria2 → $PUBLIC_IP:$HY2_PORT   password: $HY2_PASSWORD"
+echo "2. AnyTLS    → $PUBLIC_IP:$ANYTLS_PORT   password: $ANYTLS_PASSWORD"
+echo "3. SS2022(128) → $PUBLIC_IP:$SS2022_PORT   password: $SS2022_SERVER_KEY"
+echo "4. TUIC v5   → $PUBLIC_IP:$TUIC_PORT   uuid: $TUIC_UUID   password: $TUIC_PASSWORD"
 echo "=============================================="
 
-echo -e "\nCompact 配置（直接粘贴到 proxies）:"
+echo -e "\nCompact 配置（直接复制到 proxies）："
 echo "----------------------------------------------"
 echo "- {name: \"$PUBLIC_IP｜Direct｜anytls\", type: anytls, server: $PUBLIC_IP, port: $ANYTLS_PORT, password: \"$ANYTLS_PASSWORD\", skip-cert-verify: true, sni: www.usavps.com, udp: true, tfo: true, tls: true, client-fingerprint: chrome}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜hy2\", type: hysteria2, server: $PUBLIC_IP, port: $HY2_PORT, password: \"$HY2_PASSWORD\", udp: true, sni: bing.com, skip-cert-verify: true}"
@@ -277,4 +277,4 @@ else
     rc-service mihomo status
 fi
 
-echo "✅ 安装完成！配置文件位于 /etc/mihomo/"
+echo "✅ 安装完成！配置文件位于 $CONFIG_DIR/"
