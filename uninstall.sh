@@ -37,14 +37,14 @@ fi
 
 # 删除配置文件目录（谨慎操作，确认用户意图）
 echo ""
-echo "⚠️  即将删除用户配置文件目录：$HOME/.config/mihomo/"
+echo "⚠️  即将删除用户配置文件目录：/etc/mihomo/"
 echo "    该目录包含 config.yaml、证书（server.crt/server.key）等文件"
 read -p "是否确认删除？（输入 y 或 Y 确认，其余取消）: " confirm
 
 if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-    if [ -d "$HOME/.config/mihomo" ]; then
-        echo "🗑️  删除配置文件目录 $HOME/.config/mihomo"
-        rm -rf "$HOME/.config/mihomo"
+    if [ -d "/etc/mihomo" ]; then
+        echo "🗑️  删除配置文件目录 /etc/mihomo"
+        rm -rf "/etc/mihomo"
     else
         echo "ℹ️  配置文件目录已不存在，跳过"
     fi
@@ -63,5 +63,5 @@ echo "✅ Mihomo 卸载完成！"
 echo "    如需彻底清理，可手动检查以下路径："
 echo "    - /usr/local/bin/mihomo"
 echo "    - /etc/init.d/mihomo"
-echo "    - $HOME/.config/mihomo"
+echo "    - /etc/mihomo"
 echo "    - /run/mihomo.pid"
