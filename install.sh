@@ -146,13 +146,13 @@ else
 fi
 
 # 生成证书与密码
-mkdir -p $HOME/.config/mihomo/
+mkdir -p /root/.config/mihomo/
 echo "🔐 生成自签名证书..."
-openssl req -newkey rsa:2048 -nodes -keyout $HOME/.config/mihomo/server.key -x509 -days 365 -out $HOME/.config/mihomo/server.crt -subj "/C=US/ST=CA/L=SF/O=$(openssl rand -hex 8)/CN=$(openssl rand -hex 12)"
+openssl req -newkey rsa:2048 -nodes -keyout /root/.config/mihomo/server.key -x509 -days 365 -out /root/.config/mihomo/server.crt -subj "/C=US/ST=CA/L=SF/O=$(openssl rand -hex 8)/CN=$(openssl rand -hex 12)"
 
 HY2_PASSWORD=$(uuidgen)
 ANYTLS_PASSWORD=$(uuidgen)
-SS2022_SERVER_KEY=$(openssl rand -base64 24)
+SS2022_SERVER_KEY=$(openssl rand -base64 16)
 TUIC_UUID=$(uuidgen)
 TUIC_PASSWORD=$(uuidgen)
 
@@ -166,7 +166,7 @@ TUIC_PORT=$(get_valid_port "请输入 TUIC v5 端口" "$HY2_PORT $ANYTLS_PORT $S
 echo "✅ 端口设置完成：Hy2 $HY2_PORT | AnyTLS $ANYTLS_PORT | SS2022 $SS2022_PORT | TUIC $TUIC_PORT"
 
 # 生成 config.yaml
-cat > $HOME/.config/mihomo/config.yaml <<EOF
+cat > /root/.config/mihomo/config.yaml <<EOF
 listeners:
 - name: anytls-in-1
   type: anytls
@@ -188,7 +188,7 @@ listeners:
   type: shadowsocks
   port: $SS2022_PORT
   listen: 0.0.0.0
-  cipher: 2022-blake3-aes-256-gcm
+  cipher: 2022-blake3-aes-128-gcm
   password: $SS2022_SERVER_KEY
   udp: true
 - name: tuic
@@ -214,7 +214,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/mihomo -d $HOME/.config/mihomo
+ExecStart=/usr/local/bin/mihomo -d /root/.config/mihomo
 Restart=on-failure
 RestartSec=3
 User=root
@@ -231,7 +231,7 @@ else  # openrc
 #!/sbin/openrc-run
 description="Mihomo Service"
 command="/usr/local/bin/mihomo"
-command_args="-d $HOME/.config/mihomo"
+command_args="-d /root/.config/mihomo"
 pidfile="/run/mihomo.pid"
 command_background="yes"
 depend() { need net; after firewall; }
@@ -262,7 +262,7 @@ echo -e "\n3. Shadowsocks-2022"
 echo "   name: $PUBLIC_IP｜Direct｜ss2022"
 echo "   type: ss"
 echo "   server: $PUBLIC_IP  port: $SS2022_PORT"
-echo "   cipher: 2022-blake3-aes-256-gcm  password: $SS2022_SERVER_KEY  udp: true"
+echo "   cipher: 2022-blake3-aes-128-gcm  password: $SS2022_SERVER_KEY  udp: true"
 
 echo -e "\n4. TUIC v5"
 echo "   name: $PUBLIC_IP｜Direct｜tuic"
@@ -276,13 +276,13 @@ echo -e "\nCompact 配置（直接粘贴到 proxies）:"
 echo "----------------------------------------------"
 echo "- {name: \"$PUBLIC_IP｜Direct｜anytls\", type: anytls, server: $PUBLIC_IP, port: $ANYTLS_PORT, password: \"$ANYTLS_PASSWORD\", skip-cert-verify: true, sni: www.usavps.com, udp: true, tfo: true, tls: true, client-fingerprint: chrome}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜hy2\", type: hysteria2, server: $PUBLIC_IP, port: $HY2_PORT, password: \"$HY2_PASSWORD\", udp: true, sni: bing.com, skip-cert-verify: true}"
-echo "- {name: \"$PUBLIC_IP｜Direct｜ss2022\", type: ss, server: $PUBLIC_IP, port: $SS2022_PORT, cipher: 2022-blake3-aes-256-gcm, password: \"$SS2022_SERVER_KEY\", udp: true}"
+echo "- {name: \"$PUBLIC_IP｜Direct｜ss2022\", type: ss, server: $PUBLIC_IP, port: $SS2022_PORT, cipher: 2022-blake3-aes-128-gcm, password: \"$SS2022_SERVER_KEY\", udp: true}"
 echo "- {name: \"$PUBLIC_IP｜Direct｜tuic\", type: tuic, server: $PUBLIC_IP, port: $TUIC_PORT, uuid: \"$TUIC_UUID\", password: \"$TUIC_PASSWORD\", sni: www.usavps.com, alpn: [\"h3\"], udp: true, skip-cert-verify: true, congestion-controller: bbr, reduce-rtt: true}"
 echo "----------------------------------------------"
 
 echo "hysteria2://$HY2_PASSWORD@$PUBLIC_IP:$HY2_PORT?peer=bing.com&insecure=1#$PUBLIC_IP｜Direct｜hy2"
 echo "anytls://$ANYTLS_PASSWORD@$PUBLIC_IP:$ANYTLS_PORT?peer=www.usavps.com&insecure=1&fastopen=1&udp=1#$PUBLIC_IP｜Direct｜anytls"
-echo "ss://$(echo -n "2022-blake3-aes-256-gcm:$SS2022_SERVER_KEY" | base64 -w 0)@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
+echo "ss://$(echo -n "2022-blake3-aes-128-gcm:$SS2022_SERVER_KEY" | base64 -w 0)@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
 echo "tuic://$TUIC_UUID:$TUIC_PASSWORD@$PUBLIC_IP:$TUIC_PORT?alpn=h3&sni=www.usavps.com&congestion_control=bbr&udp_relay_mode=native#$PUBLIC_IP｜Direct｜tuic"
 
 # 重启服务
