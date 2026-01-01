@@ -229,13 +229,23 @@ EOF
 else  # openrc
     cat > /etc/init.d/mihomo <<'EOF'
 #!/sbin/openrc-run
-description="Mihomo Service"
+
+name="mihomo"
+description="Mihomo Proxy Service"
 command="/usr/local/bin/mihomo"
 command_args="-d /root/.config/mihomo"
-pidfile="/run/mihomo.pid"
+pidfile="/run/${RC_SVCNAME}.pid"
 command_background="yes"
-depend() { need net; after firewall; }
-start_pre() { mkdir -p $(dirname $pidfile); }
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath --directory --mode 0755 "$(dirname ${pidfile})"
+    checkpath --directory --mode 0755 /root/.config/mihomo
+}
 EOF
     chmod +x /etc/init.d/mihomo
     rc-update add mihomo default
@@ -282,7 +292,7 @@ echo "----------------------------------------------"
 
 echo "hysteria2://$HY2_PASSWORD@$PUBLIC_IP:$HY2_PORT?peer=bing.com&insecure=1#$PUBLIC_IP｜Direct｜hy2"
 echo "anytls://$ANYTLS_PASSWORD@$PUBLIC_IP:$ANYTLS_PORT?peer=www.usavps.com&insecure=1&fastopen=1&udp=1#$PUBLIC_IP｜Direct｜anytls"
-echo "ss://$(echo -n "2022-blake3-aes-128-gcm:$SS2022_SERVER_KEY" | base64 -w 0)@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
+echo "ss://$(echo -n "2022-blake3-aes-128-gcm:$SS2022_SERVER_KEY" | base64 | tr -d '\n')@$PUBLIC_IP:$SS2022_PORT?#$PUBLIC_IP｜Direct｜ss2022"
 echo "tuic://$TUIC_UUID:$TUIC_PASSWORD@$PUBLIC_IP:$TUIC_PORT?alpn=h3&sni=www.usavps.com&congestion_control=bbr&udp_relay_mode=native#$PUBLIC_IP｜Direct｜tuic"
 
 # 重启服务
